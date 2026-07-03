@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { Search, Home, Store, ShoppingBag, PlusSquare, User, MapPin, MessageCircle } from "lucide-react";
 
 export const Route = createFileRoute("/")({
@@ -155,7 +155,10 @@ function Index() {
             <span className="mt-1 font-medium text-muted-foreground">Ajouter</span>
           </button>
           <FooterBtn icon={<ShoppingBag className="h-5 w-5" />} label="Acheteur" tone="buyer" />
-          <FooterBtn icon={<User className="h-5 w-5" />} label="Profil" />
+          <Link to="/profile" className="flex flex-col items-center justify-center py-1 gap-0.5 text-muted-foreground hover:text-foreground">
+            <User className="h-5 w-5" />
+            <span className="font-medium text-[11px]">Profil</span>
+          </Link>
         </div>
       </footer>
     </div>
