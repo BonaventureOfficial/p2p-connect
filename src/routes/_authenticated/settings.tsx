@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { ArrowLeft, Eye, EyeOff, MapPin, Store, Phone, Mail, KeyRound, Trash2 } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, MapPin, Store, Phone, Mail, KeyRound, Trash2, FileText, ShieldCheck } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -86,6 +86,11 @@ function SettingsPage() {
   const [whatsapp, setWhatsapp] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
 
+  // CGU
+  const [cguAcceptedAt, setCguAcceptedAt] = useState<string | null>(null);
+  const [cguChecked, setCguChecked] = useState(false);
+  const [cguSaving, setCguSaving] = useState(false);
+
   // change email
   const [oldEmail, setOldEmail] = useState("");
   const [newEmail, setNewEmail] = useState("");
@@ -109,13 +114,15 @@ function SettingsPage() {
       setCurrentEmail(auth.user.email ?? "");
       const { data: p } = await supabase
         .from("profiles")
-        .select("address, shop_name, whatsapp")
+        .select("address, shop_name, whatsapp, cgu_accepted_at")
         .eq("id", auth.user.id)
         .maybeSingle();
       if (p) {
         setAddress(p.address ?? "");
         setShopName(p.shop_name ?? "");
         setWhatsapp(p.whatsapp ?? "");
+        setCguAcceptedAt(p.cgu_accepted_at ?? null);
+        setCguChecked(!!p.cgu_accepted_at);
       }
     })();
   }, []);
@@ -243,7 +250,22 @@ function SettingsPage() {
 
         <Section icon={<Mail className="h-4 w-4" />} title="Changer l'email">
           <Field label="Ancien email">
-            <input value={oldEmail} onChange={(e) => setOldEmail(e.target.value)} className={inputCls} placeholder={currentEmail} type="email" />
+            <input
+              value={oldEmail}
+              onChange={(e) => setOldEmail(e.target.value)}
+              onPaste={(e) => {
+                e.preventDefault();
+                toast.error("Pour votre sécurité, saisissez l'ancien email manuellement");
+              }}
+              onDrop={(e) => e.preventDefault()}
+              autoComplete="off"
+              className={inputCls}
+              placeholder="Saisissez votre ancien email"
+              type="email"
+            />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Le copier-coller est désactivé pour raison de sécurité.
+            </p>
           </Field>
           <Field label="Nouvel email">
             <input value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className={inputCls} type="email" />
@@ -271,6 +293,81 @@ function SettingsPage() {
           >
             {pwLoading ? "…" : "Mettre à jour le mot de passe"}
           </button>
+        </Section>
+
+        <Section icon={<FileText className="h-4 w-4" />} title="Conditions Générales d'Utilisation (CGU)">
+          <p className="text-[11px] text-muted-foreground">
+            L'acceptation des CGU est <span className="text-destructive">requise</span> avant de publier votre premier post.
+          </p>
+          <div className="max-h-72 overflow-y-auto rounded-md border border-border bg-secondary/60 p-3 text-xs leading-relaxed text-foreground/90 space-y-3">
+            <div>
+              <p className="font-semibold text-foreground">1. Objet de l'application</p>
+              <p>Notre application est une plateforme de mise en relation de gré à gré (P2P) entre acheteurs et vendeurs au Burundi. Elle permet la publication d'annonces de vente ou de recherche de biens et services.</p>
+            </div>
+            <div>
+              <p className="font-semibold text-foreground">2. Rôle de la plateforme (Exclusion de responsabilité)</p>
+              <ul className="list-disc pl-4 space-y-1">
+                <li>L'application n'est pas un site de vente en ligne. Elle agit uniquement comme un intermédiaire technique de mise en relation.</li>
+                <li>Nous ne possédons, ne vérifions, ne stockons et ne livrons aucun des produits ou services affichés sur la plateforme.</li>
+                <li>Les transactions finales, les paiements et les livraisons s'effectuent directement entre les utilisateurs, en dehors de l'application (notamment via WhatsApp). En conséquence, nous ne saurions être tenus responsables des arnaques, des défauts de paiement, ou de la non-conformité des produits.</li>
+              </ul>
+            </div>
+            <div>
+              <p className="font-semibold text-foreground">3. Règles de conduite et publication</p>
+              <p>En publiant une annonce, vous vous engagez à :</p>
+              <ul className="list-disc pl-4 space-y-1">
+                <li>Fournir des informations exactes, honnêtes et un numéro WhatsApp valide.</li>
+                <li>Ne pas publier de contenus illégaux, d'armes, de produits interdits par la loi burundaise, ou d'arnaques.</li>
+                <li>Respecter la communauté. Tout comportement suspect ou frauduleux entraînera le bannissement immédiat et définitif de votre compte.</li>
+              </ul>
+            </div>
+            <div>
+              <p className="font-semibold text-foreground">4. Conseils de sécurité (Rappel important)</p>
+              <p>Pour votre sécurité :</p>
+              <ul className="list-disc pl-4 space-y-1">
+                <li>Ne versez jamais d'argent en avance (par Lumicash, EcoCash ou autre) avant d'avoir vu et vérifié le produit de vos propres yeux.</li>
+                <li>Fixez vos rendez-vous pour la transaction dans des lieux publics et sécurisés en journée.</li>
+              </ul>
+            </div>
+          </div>
+          <label className="flex items-start gap-2 text-xs text-foreground cursor-pointer">
+            <input
+              type="checkbox"
+              checked={cguChecked}
+              onChange={(e) => setCguChecked(e.target.checked)}
+              disabled={!!cguAcceptedAt}
+              className="mt-0.5 h-4 w-4 accent-primary"
+            />
+            <span>
+              J'ai lu et j'accepte les Conditions Générales d'Utilisation.
+              {cguAcceptedAt && (
+                <span className="ml-1 inline-flex items-center gap-1 text-primary">
+                  <ShieldCheck className="h-3 w-3" /> Acceptées le {new Date(cguAcceptedAt).toLocaleDateString()}
+                </span>
+              )}
+            </span>
+          </label>
+          {!cguAcceptedAt && (
+            <button
+              onClick={async () => {
+                if (!cguChecked) return toast.error("Veuillez cocher la case d'acceptation");
+                setCguSaving(true);
+                const now = new Date().toISOString();
+                const { error } = await supabase
+                  .from("profiles")
+                  .update({ cgu_accepted_at: now })
+                  .eq("id", userId);
+                setCguSaving(false);
+                if (error) return toast.error(error.message);
+                setCguAcceptedAt(now);
+                toast.success("CGU acceptées");
+              }}
+              disabled={cguSaving || !cguChecked}
+              className="w-full h-10 rounded-full bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 disabled:opacity-50"
+            >
+              {cguSaving ? "…" : "Accepter les CGU"}
+            </button>
+          )}
         </Section>
 
         <Section icon={<Trash2 className="h-4 w-4 text-destructive" />} title="Supprimer le compte">
