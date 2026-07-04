@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { Settings, LogOut, Camera, User as UserIcon } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -103,12 +103,13 @@ function ProfilePage() {
               Se déconnecter
             </button>
           </div>
-          <button
+          <Link
+            to="/settings"
             aria-label="Paramètres"
             className="h-10 w-10 rounded-full border border-border bg-secondary grid place-items-center text-muted-foreground hover:text-foreground"
           >
             <Settings className="h-5 w-5" />
-          </button>
+          </Link>
         </div>
       </header>
 
