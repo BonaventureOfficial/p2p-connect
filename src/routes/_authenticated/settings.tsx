@@ -1,9 +1,10 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { ArrowLeft, Eye, EyeOff, MapPin, Store, Phone, Mail, KeyRound, Trash2, FileText, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, MapPin, Store, Phone, Mail, KeyRound, Trash2, FileText, ShieldCheck, Wallet, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { z } from "zod";
+import { LanguageSwitcher, useI18n } from "@/lib/i18n";
 
 export const Route = createFileRoute("/_authenticated/settings")({
   component: SettingsPage,
@@ -75,7 +76,10 @@ function PasswordInput({
   );
 }
 
+const PAYMENT_PRESETS = ["Lumicash", "EcoCash", "Compte bancaire"];
+
 function SettingsPage() {
+  const { t } = useI18n();
   const navigate = useNavigate();
   const [userId, setUserId] = useState("");
   const [currentEmail, setCurrentEmail] = useState("");
@@ -85,6 +89,10 @@ function SettingsPage() {
   const [shopName, setShopName] = useState("");
   const [whatsapp, setWhatsapp] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
+
+  // payment methods
+  const [paymentMethods, setPaymentMethods] = useState<string[]>([]);
+  const [customPayment, setCustomPayment] = useState("");
 
   // CGU
   const [cguAcceptedAt, setCguAcceptedAt] = useState<string | null>(null);
@@ -114,7 +122,7 @@ function SettingsPage() {
       setCurrentEmail(auth.user.email ?? "");
       const { data: p } = await supabase
         .from("profiles")
-        .select("address, shop_name, whatsapp, cgu_accepted_at")
+        .select("address, shop_name, whatsapp, cgu_accepted_at, payment_methods")
         .eq("id", auth.user.id)
         .maybeSingle();
       if (p) {
@@ -123,6 +131,7 @@ function SettingsPage() {
         setWhatsapp(p.whatsapp ?? "");
         setCguAcceptedAt(p.cgu_accepted_at ?? null);
         setCguChecked(!!p.cgu_accepted_at);
+        setPaymentMethods(p.payment_methods ?? []);
       }
     })();
   }, []);
@@ -134,14 +143,35 @@ function SettingsPage() {
     if (!/^\+\d{6,15}$/.test(wa)) {
       return toast.error("WhatsApp doit commencer par + et le code pays (ex: +25779xxxxxxx)");
     }
+    if (paymentMethods.length === 0) {
+      return toast.error("Sélectionnez au moins un mode de paiement");
+    }
     setSavingProfile(true);
     const { error } = await supabase
       .from("profiles")
-      .update({ address: address.trim(), shop_name: shopName.trim(), whatsapp: wa })
+      .update({
+        address: address.trim(),
+        shop_name: shopName.trim(),
+        whatsapp: wa,
+        payment_methods: paymentMethods,
+      })
       .eq("id", userId);
     setSavingProfile(false);
     if (error) toast.error(error.message);
     else toast.success("Informations enregistrées");
+  };
+
+  const togglePayment = (name: string) => {
+    setPaymentMethods((cur) =>
+      cur.includes(name) ? cur.filter((x) => x !== name) : [...cur, name],
+    );
+  };
+  const addCustomPayment = () => {
+    const v = customPayment.trim();
+    if (!v) return;
+    if (paymentMethods.includes(v)) return setCustomPayment("");
+    setPaymentMethods((cur) => [...cur, v]);
+    setCustomPayment("");
   };
 
   const changeEmail = async () => {
@@ -212,7 +242,8 @@ function SettingsPage() {
           >
             <ArrowLeft className="h-5 w-5" />
           </Link>
-          <h1 className="text-lg font-bold text-foreground">Paramètres</h1>
+          <h1 className="text-lg font-bold text-foreground flex-1">{t("settings.title")}</h1>
+          <LanguageSwitcher />
         </div>
       </header>
 
@@ -240,12 +271,78 @@ function SettingsPage() {
           </Field>
         </Section>
 
+        <Section icon={<Wallet className="h-4 w-4" />} title={t("settings.payment")}>
+          <p className="text-[11px] text-muted-foreground">{t("settings.payment.hint")}</p>
+          <div className="flex flex-wrap gap-2">
+            {PAYMENT_PRESETS.map((name) => {
+              const active = paymentMethods.includes(name);
+              return (
+                <button
+                  key={name}
+                  type="button"
+                  onClick={() => togglePayment(name)}
+                  className={`px-3 h-9 rounded-full text-xs font-semibold border transition ${
+                    active
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-secondary text-foreground border-border hover:bg-accent"
+                  }`}
+                >
+                  {name}
+                </button>
+              );
+            })}
+          </div>
+          {paymentMethods.filter((m) => !PAYMENT_PRESETS.includes(m)).length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {paymentMethods
+                .filter((m) => !PAYMENT_PRESETS.includes(m))
+                .map((m) => (
+                  <span
+                    key={m}
+                    className="inline-flex items-center gap-1 pl-3 pr-1 h-9 rounded-full text-xs font-semibold bg-primary text-primary-foreground"
+                  >
+                    {m}
+                    <button
+                      type="button"
+                      onClick={() => togglePayment(m)}
+                      aria-label="Retirer"
+                      className="h-6 w-6 grid place-items-center rounded-full hover:bg-black/20"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <input
+              value={customPayment}
+              onChange={(e) => setCustomPayment(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addCustomPayment();
+                }
+              }}
+              placeholder={t("settings.payment.custom")}
+              className={inputCls}
+            />
+            <button
+              type="button"
+              onClick={addCustomPayment}
+              className="h-10 px-4 rounded-md bg-secondary border border-border text-sm font-semibold text-foreground hover:bg-accent"
+            >
+              {t("settings.payment.add")}
+            </button>
+          </div>
+        </Section>
+
         <button
           onClick={saveProfile}
           disabled={savingProfile}
           className="w-full h-11 rounded-full bg-foreground text-background font-semibold text-sm hover:opacity-90 disabled:opacity-50"
         >
-          {savingProfile ? "…" : "Enregistrer les informations"}
+          {savingProfile ? "…" : t("settings.save")}
         </button>
 
         <Section icon={<Mail className="h-4 w-4" />} title="Changer l'email">
