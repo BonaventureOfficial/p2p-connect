@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Search, Home, Store, ShoppingBag, PlusSquare, User, MapPin, MessageCircle } from "lucide-react";
+import { LanguageSwitcher, useI18n } from "@/lib/i18n";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -51,6 +52,7 @@ const POSTS: Array<{
 ];
 
 function Index() {
+  const { t } = useI18n();
   return (
     <div className="min-h-screen bg-background text-foreground pb-24">
       {/* HEADER */}
@@ -65,15 +67,11 @@ function Index() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
               type="search"
-              placeholder="Rechercher un produit, service, vendeur…"
+              placeholder={t("search.placeholder")}
               className="w-full h-10 pl-9 pr-3 rounded-full bg-secondary text-foreground placeholder:text-muted-foreground border border-border focus:outline-none focus:ring-2 focus:ring-ring text-sm"
             />
           </div>
-          <nav className="flex items-center rounded-full border border-border bg-secondary p-0.5 text-xs font-semibold">
-            <button className="px-2.5 py-1 rounded-full text-muted-foreground hover:text-foreground">ANG</button>
-            <button className="px-2.5 py-1 rounded-full bg-accent text-foreground">FR</button>
-            <button className="px-2.5 py-1 rounded-full text-muted-foreground hover:text-foreground">Ki</button>
-          </nav>
+          <LanguageSwitcher />
         </div>
 
         {/* CATEGORIES MARQUEE */}
@@ -115,7 +113,7 @@ function Index() {
                         isSeller ? "bg-seller/15 text-seller" : "bg-buyer/15 text-buyer"
                       }`}
                     >
-                      {p.role}
+                      {t(`role.${p.role}`)}
                     </span>
                   </div>
                   <p className="mt-1.5 text-sm text-foreground/90 leading-relaxed">{p.description}</p>
@@ -146,18 +144,18 @@ function Index() {
       {/* FOOTER NAV */}
       <footer className="fixed bottom-0 inset-x-0 z-40 bg-card/95 backdrop-blur border-t border-border">
         <div className="mx-auto max-w-2xl px-2 py-2 grid grid-cols-5 items-center gap-1 text-[11px]">
-          <FooterBtn icon={<Home className="h-5 w-5" />} label="Home" active />
-          <FooterBtn icon={<Store className="h-5 w-5" />} label="Vendeur" tone="seller" />
+          <FooterBtn icon={<Home className="h-5 w-5" />} label={t("nav.home")} active />
+          <FooterBtn icon={<Store className="h-5 w-5" />} label={t("nav.seller")} tone="seller" />
           <button className="flex flex-col items-center justify-center">
             <span className="h-11 w-11 -mt-6 rounded-full bg-foreground text-background grid place-items-center shadow-lg">
               <PlusSquare className="h-5 w-5" />
             </span>
-            <span className="mt-1 font-medium text-muted-foreground">Ajouter</span>
+            <span className="mt-1 font-medium text-muted-foreground">{t("nav.add")}</span>
           </button>
-          <FooterBtn icon={<ShoppingBag className="h-5 w-5" />} label="Acheteur" tone="buyer" />
+          <FooterBtn icon={<ShoppingBag className="h-5 w-5" />} label={t("nav.buyer")} tone="buyer" />
           <Link to="/profile" className="flex flex-col items-center justify-center py-1 gap-0.5 text-muted-foreground hover:text-foreground">
             <User className="h-5 w-5" />
-            <span className="font-medium text-[11px]">Profil</span>
+            <span className="font-medium text-[11px]">{t("nav.profile")}</span>
           </Link>
         </div>
       </footer>
