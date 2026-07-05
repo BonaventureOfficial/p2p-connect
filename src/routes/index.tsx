@@ -1,5 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Search, Home, Store, ShoppingBag, PlusSquare, User, MapPin, MessageCircle } from "lucide-react";
+import { Search, Home, Store, ShoppingBag, PlusSquare, User, MapPin, MessageCircle, Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
 import { LanguageSwitcher, useI18n } from "@/lib/i18n";
 
 export const Route = createFileRoute("/")({
@@ -20,39 +22,66 @@ const CATEGORIES = [
   "Kit Média", "Hôpitaux", "Les Vivres", "Immobilier", "Beauté", "Agriculture",
 ];
 
-type Role = "Vendeur" | "Acheteur";
-const POSTS: Array<{
-  id: number; name: string; role: Role; avatar: string;
-  description: string; address: string; price: string; phone: string;
-}> = [
-  { id: 1, name: "Jean-Claude M.", role: "Vendeur", avatar: "JM",
-    description: "iPhone 14 Pro 256GB, état neuf, boîte et accessoires inclus.",
-    address: "Bujumbura, Rohero", price: "1 250 000 BIF", phone: "25779123456" },
-  { id: 2, name: "Aline K.", role: "Acheteur", avatar: "AK",
-    description: "Recherche 20 sacs de riz Kirundo qualité premium pour restaurant.",
-    address: "Gitega, Centre", price: "Budget 2 000 000 BIF", phone: "25771987654" },
-  { id: 3, name: "Hotel Panorama", role: "Vendeur", avatar: "HP",
-    description: "Suite exécutive avec vue lac, petit-déjeuner et wifi inclus.",
-    address: "Bujumbura, Kiriri", price: "180 000 BIF / nuit", phone: "25722445566" },
-  { id: 4, name: "David N.", role: "Vendeur", avatar: "DN",
-    description: "Toyota RAV4 2018, 78 000 km, entretien à jour, très propre.",
-    address: "Ngozi, Ville", price: "38 500 000 BIF", phone: "25776554433" },
-  { id: 5, name: "Cargo Express", role: "Vendeur", avatar: "CE",
-    description: "Transport cargo Bujumbura ↔ Dar es Salaam, 3 rotations/semaine.",
-    address: "Port de Bujumbura", price: "à partir de 950 USD/tonne", phone: "25778112233" },
-  { id: 6, name: "Sarah B.", role: "Acheteur", avatar: "SB",
-    description: "Cherche kit de cuisine professionnel complet pour ouverture resto.",
-    address: "Bujumbura, Kinindo", price: "Budget 5 000 USD", phone: "25779332211" },
-  { id: 7, name: "MusicStore BDI", role: "Vendeur", avatar: "MB",
-    description: "Guitare électrique Fender Squier + ampli 40W, garantie 6 mois.",
-    address: "Bujumbura, Asiatique", price: "780 000 BIF", phone: "25771556677" },
-  { id: 8, name: "Clinique Amani", role: "Vendeur", avatar: "CA",
-    description: "Consultation générale, cardiologie et laboratoire sur rendez-vous.",
-    address: "Bujumbura, Mutanga", price: "dès 25 000 BIF", phone: "25722998877" },
-];
+type FeedPost = {
+  id: string;
+  role: "seller" | "buyer";
+  description: string;
+  price: string | null;
+  images: string[];
+  imageUrls: string[];
+  address: string;
+  shop_name: string;
+  whatsapp: string;
+  payment_methods: string[];
+  author: { username: string; avatar_url: string | null; avatarSignedUrl: string | null };
+};
+
+function initials(name: string) {
+  return name.split(/[\s._-]+/).filter(Boolean).slice(0, 2).map((s) => s[0]?.toUpperCase() ?? "").join("") || "?";
+}
 
 function Index() {
   const { t } = useI18n();
+  const [posts, setPosts] = useState<FeedPost[] | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const { data, error } = await supabase
+        .from("posts")
+        .select("id, role, description, price, images, address, shop_name, whatsapp, payment_methods, author_id, profiles:author_id(username, avatar_url)")
+        .order("created_at", { ascending: false })
+        .limit(50);
+      if (error || !data) { setPosts([]); return; }
+
+      const enriched: FeedPost[] = await Promise.all(
+        data.map(async (row: any) => {
+          const imageUrls: string[] = [];
+          for (const p of row.images ?? []) {
+            const { data: s } = await supabase.storage.from("post-images").createSignedUrl(p, 60 * 60);
+            if (s?.signedUrl) imageUrls.push(s.signedUrl);
+          }
+          let avatarSignedUrl: string | null = null;
+          if (row.profiles?.avatar_url) {
+            const { data: s } = await supabase.storage.from("avatars").createSignedUrl(row.profiles.avatar_url, 60 * 60);
+            avatarSignedUrl = s?.signedUrl ?? null;
+          }
+          return {
+            id: row.id, role: row.role, description: row.description, price: row.price,
+            images: row.images ?? [], imageUrls,
+            address: row.address, shop_name: row.shop_name, whatsapp: row.whatsapp,
+            payment_methods: row.payment_methods ?? [],
+            author: {
+              username: row.profiles?.username ?? "utilisateur",
+              avatar_url: row.profiles?.avatar_url ?? null,
+              avatarSignedUrl,
+            },
+          };
+        }),
+      );
+      setPosts(enriched);
+    })();
+  }, []);
+
   return (
     <div className="min-h-screen bg-background text-foreground pb-24">
       {/* HEADER */}
@@ -91,54 +120,102 @@ function Index() {
 
       {/* FEED */}
       <main className="mx-auto max-w-2xl px-4 py-5 space-y-4">
-        {POSTS.map((p) => {
-          const isSeller = p.role === "Vendeur";
-          const waUrl = `https://wa.me/${p.phone}?text=${encodeURIComponent(`Bonjour ${p.name}, je vous contacte via P2P au sujet de: ${p.description}`)}`;
-          return (
-            <article key={p.id} className="rounded-2xl bg-card border border-border p-4 shadow-sm">
-              <div className="flex items-start gap-3">
-                <div
-                  className={`h-12 w-12 shrink-0 rounded-full grid place-items-center font-bold text-sm ${
-                    isSeller ? "bg-seller text-primary-foreground" : "bg-buyer text-foreground"
-                  }`}
-                  aria-hidden
-                >
-                  {p.avatar}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="font-semibold text-foreground truncate">{p.name}</h3>
-                    <span
-                      className={`text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full ${
-                        isSeller ? "bg-seller/15 text-seller" : "bg-buyer/15 text-buyer"
+        {posts === null ? (
+          <div className="grid place-items-center py-20 text-muted-foreground">
+            <Loader2 className="h-6 w-6 animate-spin" />
+          </div>
+        ) : posts.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-border bg-card/40 p-10 text-center">
+            <h2 className="text-lg font-bold">Encore aucune publication</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Soyez le premier à publier sur P2P.
+            </p>
+            <Link
+              to="/add"
+              className="mt-5 inline-flex items-center gap-2 rounded-full bg-foreground text-background px-5 py-2 text-sm font-semibold hover:opacity-90"
+            >
+              <PlusSquare className="h-4 w-4" /> Créer un post
+            </Link>
+          </div>
+        ) : (
+          posts.map((p) => {
+            const isSeller = p.role === "seller";
+            const waNumber = p.whatsapp.replace(/[^\d]/g, "");
+            const waUrl = `https://wa.me/${waNumber}?text=${encodeURIComponent(`Bonjour ${p.author.username}, je vous contacte via P2P au sujet de: ${p.description}`)}`;
+            return (
+              <article key={p.id} className="rounded-2xl bg-card border border-border overflow-hidden shadow-sm">
+                <div className="p-4">
+                  <div className="flex items-start gap-3">
+                    <div
+                      className={`h-12 w-12 shrink-0 rounded-full overflow-hidden grid place-items-center font-bold text-sm ${
+                        isSeller ? "bg-seller text-primary-foreground" : "bg-buyer text-foreground"
                       }`}
                     >
-                      {t(`role.${p.role}`)}
-                    </span>
-                  </div>
-                  <p className="mt-1.5 text-sm text-foreground/90 leading-relaxed">{p.description}</p>
-                  <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <MapPin className="h-3.5 w-3.5" />
-                    <span>{p.address}</span>
+                      {p.author.avatarSignedUrl ? (
+                        <img src={p.author.avatarSignedUrl} alt={p.author.username} className="h-full w-full object-cover" />
+                      ) : (
+                        initials(p.author.username)
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="font-semibold text-foreground truncate">{p.author.username}</h3>
+                        <span
+                          className={`text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full ${
+                            isSeller ? "bg-seller/15 text-seller" : "bg-buyer/15 text-buyer"
+                          }`}
+                        >
+                          {t(isSeller ? "role.Vendeur" : "role.Acheteur")}
+                        </span>
+                      </div>
+                      <p className="mt-1.5 text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap">{p.description}</p>
+                      <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <MapPin className="h-3.5 w-3.5" />
+                        <span>{p.address} · {p.shop_name}</span>
+                      </div>
+                      {p.payment_methods.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {p.payment_methods.map((m) => (
+                            <span key={m} className="text-[10px] px-2 py-0.5 rounded-full bg-secondary border border-border text-muted-foreground">
+                              {m}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="mt-4 flex items-center justify-between gap-3">
-                <div className="text-base font-bold text-foreground">{p.price}</div>
-                <a
-                  href={waUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-2 rounded-full bg-whatsapp text-primary-foreground px-4 py-2 text-sm font-semibold hover:opacity-90 transition"
-                >
-                  <MessageCircle className="h-4 w-4" />
-                  WhatsApp
-                </a>
-              </div>
-            </article>
-          );
-        })}
+                {p.imageUrls.length > 0 && (
+                  <div className={`grid gap-1 ${p.imageUrls.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}>
+                    {p.imageUrls.slice(0, 4).map((url, i) => (
+                      <img
+                        key={i}
+                        src={url}
+                        alt=""
+                        className="w-full aspect-square object-cover"
+                        loading="lazy"
+                      />
+                    ))}
+                  </div>
+                )}
+
+                <div className="p-4 flex items-center justify-between gap-3 border-t border-border">
+                  <div className="text-base font-bold text-foreground">{p.price ?? ""}</div>
+                  <a
+                    href={waUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-2 rounded-full bg-whatsapp text-primary-foreground px-4 py-2 text-sm font-semibold hover:opacity-90 transition"
+                  >
+                    <MessageCircle className="h-4 w-4" />
+                    WhatsApp
+                  </a>
+                </div>
+              </article>
+            );
+          })
+        )}
       </main>
 
       {/* FOOTER NAV */}
@@ -146,12 +223,12 @@ function Index() {
         <div className="mx-auto max-w-2xl px-2 py-2 grid grid-cols-5 items-center gap-1 text-[11px]">
           <FooterBtn icon={<Home className="h-5 w-5" />} label={t("nav.home")} active />
           <FooterBtn icon={<Store className="h-5 w-5" />} label={t("nav.seller")} tone="seller" />
-          <button className="flex flex-col items-center justify-center">
+          <Link to="/add" className="flex flex-col items-center justify-center">
             <span className="h-11 w-11 -mt-6 rounded-full bg-foreground text-background grid place-items-center shadow-lg">
               <PlusSquare className="h-5 w-5" />
             </span>
             <span className="mt-1 font-medium text-muted-foreground">{t("nav.add")}</span>
-          </button>
+          </Link>
           <FooterBtn icon={<ShoppingBag className="h-5 w-5" />} label={t("nav.buyer")} tone="buyer" />
           <Link to="/profile" className="flex flex-col items-center justify-center py-1 gap-0.5 text-muted-foreground hover:text-foreground">
             <User className="h-5 w-5" />
