@@ -21,6 +21,7 @@ export type Database = {
           cgu_accepted_at: string | null
           created_at: string
           id: string
+          payment_methods: string[]
           shop_name: string | null
           updated_at: string
           username: string
@@ -32,6 +33,7 @@ export type Database = {
           cgu_accepted_at?: string | null
           created_at?: string
           id: string
+          payment_methods?: string[]
           shop_name?: string | null
           updated_at?: string
           username: string
@@ -43,6 +45,7 @@ export type Database = {
           cgu_accepted_at?: string | null
           created_at?: string
           id?: string
+          payment_methods?: string[]
           shop_name?: string | null
           updated_at?: string
           username?: string
