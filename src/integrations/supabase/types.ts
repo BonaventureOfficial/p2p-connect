@@ -57,12 +57,21 @@ export type Database = {
           updated_at?: string
           whatsapp?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "posts_author_id_profiles_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       profiles: {
         Row: {
           address: string | null
           avatar_url: string | null
+          bio: string | null
           cgu_accepted_at: string | null
           created_at: string
           id: string
@@ -75,6 +84,7 @@ export type Database = {
         Insert: {
           address?: string | null
           avatar_url?: string | null
+          bio?: string | null
           cgu_accepted_at?: string | null
           created_at?: string
           id: string
@@ -87,6 +97,7 @@ export type Database = {
         Update: {
           address?: string | null
           avatar_url?: string | null
+          bio?: string | null
           cgu_accepted_at?: string | null
           created_at?: string
           id?: string

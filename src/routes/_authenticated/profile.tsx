@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import { Settings, LogOut, Camera, User as UserIcon } from "lucide-react";
+import { Settings, LogOut, Camera, User as UserIcon, Pencil, Check, X, ImageIcon } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -23,6 +23,14 @@ function ProfilePage() {
   const [username, setUsername] = useState("");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [bio, setBio] = useState("");
+  const [bioDraft, setBioDraft] = useState("");
+  const [editingBio, setEditingBio] = useState(false);
+  const [savingBio, setSavingBio] = useState(false);
+  const [posts, setPosts] = useState<
+    { id: string; description: string; images: string[]; signedThumbs: string[]; created_at: string }[]
+  >([]);
+  const [loadingPosts, setLoadingPosts] = useState(true);
 
   const loadProfile = async () => {
     const { data: auth } = await supabase.auth.getUser();
@@ -31,11 +39,13 @@ function ProfilePage() {
     setUserId(auth.user.id);
     const { data: profile } = await supabase
       .from("profiles")
-      .select("username, avatar_url")
+      .select("username, avatar_url, bio")
       .eq("id", auth.user.id)
       .maybeSingle();
     if (profile) {
       setUsername(profile.username);
+      setBio(profile.bio ?? "");
+      setBioDraft(profile.bio ?? "");
       if (profile.avatar_url) {
         const { data: signed } = await supabase.storage
           .from("avatars")
@@ -45,11 +55,57 @@ function ProfilePage() {
         setAvatarUrl(null);
       }
     }
+    await loadPosts(auth.user.id);
+  };
+
+  const loadPosts = async (uid: string) => {
+    setLoadingPosts(true);
+    const { data, error } = await supabase
+      .from("posts")
+      .select("id, description, images, created_at")
+      .eq("author_id", uid)
+      .order("created_at", { ascending: false });
+    if (error) {
+      toast.error(error.message);
+      setLoadingPosts(false);
+      return;
+    }
+    const rows = await Promise.all(
+      (data ?? []).map(async (p) => {
+        const thumbs = (p.images ?? []).slice(0, 3);
+        const signedThumbs: string[] = [];
+        for (const path of thumbs) {
+          const { data: s } = await supabase.storage
+            .from("post-images")
+            .createSignedUrl(path, 60 * 60);
+          if (s?.signedUrl) signedThumbs.push(s.signedUrl);
+        }
+        return { ...p, signedThumbs };
+      }),
+    );
+    setPosts(rows);
+    setLoadingPosts(false);
   };
 
   useEffect(() => {
     loadProfile();
   }, []);
+
+  const saveBio = async () => {
+    if (!userId) return;
+    setSavingBio(true);
+    const { error } = await supabase
+      .from("profiles")
+      .update({ bio: bioDraft.trim() || null })
+      .eq("id", userId);
+    if (error) toast.error(error.message);
+    else {
+      setBio(bioDraft.trim());
+      setEditingBio(false);
+      toast.success("Bio mise à jour");
+    }
+    setSavingBio(false);
+  };
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -145,6 +201,94 @@ function ProfilePage() {
         {uploading && (
           <p className="mt-3 text-xs text-muted-foreground">Envoi en cours…</p>
         )}
+
+        {/* Bio */}
+        <div className="mt-6 w-full">
+          {editingBio ? (
+            <div className="space-y-2">
+              <textarea
+                value={bioDraft}
+                onChange={(e) => setBioDraft(e.target.value)}
+                maxLength={280}
+                rows={3}
+                placeholder="Parlez brièvement de vous…"
+                className="w-full rounded-xl bg-card border border-border p-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => {
+                    setBioDraft(bio);
+                    setEditingBio(false);
+                  }}
+                  className="inline-flex items-center gap-1 rounded-full border border-border bg-secondary px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-3.5 w-3.5" /> Annuler
+                </button>
+                <button
+                  onClick={saveBio}
+                  disabled={savingBio}
+                  className="inline-flex items-center gap-1 rounded-full bg-foreground text-background px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
+                >
+                  <Check className="h-3.5 w-3.5" /> Enregistrer
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setEditingBio(true)}
+              className="group w-full text-left rounded-xl border border-border bg-card p-3 text-sm text-foreground/90 hover:border-foreground/40 transition"
+            >
+              <div className="flex items-start gap-2">
+                <span className="flex-1 whitespace-pre-wrap">
+                  {bio || <span className="text-muted-foreground italic">Ajouter une bio…</span>}
+                </span>
+                <Pencil className="h-4 w-4 text-muted-foreground group-hover:text-foreground shrink-0" />
+              </div>
+            </button>
+          )}
+        </div>
+
+        {/* Gallery */}
+        <div className="mt-8 w-full">
+          <h2 className="text-sm font-bold text-foreground mb-3">
+            Ma galerie <span className="text-muted-foreground font-normal">({posts.length})</span>
+          </h2>
+          {loadingPosts ? (
+            <div className="text-center py-8 text-xs text-muted-foreground">Chargement…</div>
+          ) : posts.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border bg-card/60 py-10 text-center text-sm text-muted-foreground">
+              Aucune publication pour l'instant.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {posts.map((p) => (
+                <div
+                  key={p.id}
+                  className="rounded-xl border border-border bg-card overflow-hidden"
+                >
+                  <div className="grid grid-cols-3 gap-0.5 bg-border">
+                    {[0, 1, 2].map((i) => {
+                      const src = p.signedThumbs[i];
+                      return (
+                        <div
+                          key={i}
+                          className="aspect-square bg-secondary grid place-items-center overflow-hidden"
+                        >
+                          {src ? (
+                            <img src={src} alt="" className="h-full w-full object-cover" />
+                          ) : (
+                            <ImageIcon className="h-5 w-5 text-muted-foreground/40" />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="p-3 text-xs text-foreground/80 line-clamp-2">{p.description}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </main>
     </div>
   );
