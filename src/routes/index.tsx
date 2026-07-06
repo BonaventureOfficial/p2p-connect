@@ -33,7 +33,7 @@ type FeedPost = {
   shop_name: string;
   whatsapp: string;
   payment_methods: string[];
-  author: { username: string; avatar_url: string | null; avatarSignedUrl: string | null };
+  author: { username: string; avatar_url: string | null; avatarSignedUrl: string | null; online: boolean };
 };
 
 function initials(name: string) {
@@ -48,7 +48,7 @@ function Index() {
     (async () => {
       const { data, error } = await supabase
         .from("posts")
-        .select("id, role, description, price, images, address, shop_name, whatsapp, payment_methods, author_id, profiles:author_id(username, avatar_url)")
+        .select("id, role, description, price, images, address, shop_name, whatsapp, payment_methods, author_id, profiles:author_id(username, avatar_url, online_until)")
         .order("created_at", { ascending: false })
         .limit(50);
       if (error || !data) { setPosts([]); return; }
@@ -74,6 +74,7 @@ function Index() {
               username: row.profiles?.username ?? "utilisateur",
               avatar_url: row.profiles?.avatar_url ?? null,
               avatarSignedUrl,
+              online: row.profiles?.online_until ? new Date(row.profiles.online_until).getTime() > Date.now() : false,
             },
           };
         }),
@@ -146,16 +147,24 @@ function Index() {
               <article key={p.id} className="rounded-2xl bg-card border border-border overflow-hidden shadow-sm">
                 <div className="p-4">
                   <div className="flex items-start gap-3">
-                    <div
-                      className={`h-12 w-12 shrink-0 rounded-full overflow-hidden grid place-items-center font-bold text-sm ${
-                        isSeller ? "bg-seller text-primary-foreground" : "bg-buyer text-foreground"
-                      }`}
-                    >
-                      {p.author.avatarSignedUrl ? (
-                        <img src={p.author.avatarSignedUrl} alt={p.author.username} className="h-full w-full object-cover" />
-                      ) : (
-                        initials(p.author.username)
-                      )}
+                    <div className="relative shrink-0">
+                      <div
+                        className={`h-12 w-12 rounded-full overflow-hidden grid place-items-center font-bold text-sm ${
+                          isSeller ? "bg-seller text-primary-foreground" : "bg-buyer text-foreground"
+                        }`}
+                      >
+                        {p.author.avatarSignedUrl ? (
+                          <img src={p.author.avatarSignedUrl} alt={p.author.username} className="h-full w-full object-cover" />
+                        ) : (
+                          initials(p.author.username)
+                        )}
+                      </div>
+                      <span
+                        title={p.author.online ? "En ligne" : "Hors ligne"}
+                        className={`absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full ring-2 ring-card ${
+                          p.author.online ? "bg-emerald-500" : "bg-red-500"
+                        }`}
+                      />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -168,20 +177,10 @@ function Index() {
                           {t(isSeller ? "role.Vendeur" : "role.Acheteur")}
                         </span>
                       </div>
-                      <p className="mt-1.5 text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap">{p.description}</p>
-                      <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
                         <MapPin className="h-3.5 w-3.5" />
                         <span>{p.address} · {p.shop_name}</span>
                       </div>
-                      {p.payment_methods.length > 0 && (
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {p.payment_methods.map((m) => (
-                            <span key={m} className="text-[10px] px-2 py-0.5 rounded-full bg-secondary border border-border text-muted-foreground">
-                              {m}
-                            </span>
-                          ))}
-                        </div>
-                      )}
                     </div>
                   </div>
                 </div>
@@ -200,7 +199,20 @@ function Index() {
                   </div>
                 )}
 
-                <div className="p-4 flex items-center justify-between gap-3 border-t border-border">
+                <div className="px-4 pt-3">
+                  <p className="text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap">{p.description}</p>
+                  {p.payment_methods.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {p.payment_methods.map((m) => (
+                        <span key={m} className="text-[10px] px-2 py-0.5 rounded-full bg-secondary border border-border text-muted-foreground">
+                          {m}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-4 mt-2 flex items-center justify-between gap-3 border-t border-border">
                   <div className="text-base font-bold text-foreground">{p.price ?? ""}</div>
                   <a
                     href={waUrl}
