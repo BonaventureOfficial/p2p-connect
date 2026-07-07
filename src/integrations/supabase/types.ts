@@ -18,6 +18,8 @@ export type Database = {
         Row: {
           address: string
           author_id: string
+          boosted_at: string | null
+          category: string | null
           created_at: string
           description: string
           id: string
@@ -32,6 +34,8 @@ export type Database = {
         Insert: {
           address: string
           author_id: string
+          boosted_at?: string | null
+          category?: string | null
           created_at?: string
           description: string
           id?: string
@@ -46,6 +50,8 @@ export type Database = {
         Update: {
           address?: string
           author_id?: string
+          boosted_at?: string | null
+          category?: string | null
           created_at?: string
           description?: string
           id?: string
@@ -73,10 +79,14 @@ export type Database = {
           avatar_url: string | null
           bio: string | null
           cgu_accepted_at: string | null
+          city: string | null
           created_at: string
           id: string
+          last_active_at: string | null
+          last_boost_at: string | null
           online_until: string | null
           payment_methods: string[]
+          province: string | null
           shop_name: string | null
           updated_at: string
           username: string
@@ -87,10 +97,14 @@ export type Database = {
           avatar_url?: string | null
           bio?: string | null
           cgu_accepted_at?: string | null
+          city?: string | null
           created_at?: string
           id: string
+          last_active_at?: string | null
+          last_boost_at?: string | null
           online_until?: string | null
           payment_methods?: string[]
+          province?: string | null
           shop_name?: string | null
           updated_at?: string
           username: string
@@ -101,10 +115,14 @@ export type Database = {
           avatar_url?: string | null
           bio?: string | null
           cgu_accepted_at?: string | null
+          city?: string | null
           created_at?: string
           id?: string
+          last_active_at?: string | null
+          last_boost_at?: string | null
           online_until?: string | null
           payment_methods?: string[]
+          province?: string | null
           shop_name?: string | null
           updated_at?: string
           username?: string
