@@ -10,6 +10,12 @@ export const Route = createFileRoute("/_authenticated/add")({
 
 type PickedImage = { file: File; previewUrl: string };
 
+const CATEGORIES = [
+  "Électroniques", "Hôtels", "Restaurants", "Cargo", "Vêtements",
+  "Kit de Cuisine", "Kit de Sport", "Voitures", "Instruments de Musique",
+  "Kit Média", "Hôpitaux", "Les Vivres", "Immobilier", "Beauté", "Agriculture",
+];
+
 function AddPostPage() {
   const navigate = useNavigate();
   const fileInput = useRef<HTMLInputElement>(null);
@@ -25,6 +31,7 @@ function AddPostPage() {
   const [role, setRole] = useState<"seller" | "buyer">("seller");
   const [description, setDescription] = useState("");
   const [price, setPrice] = useState("");
+  const [category, setCategory] = useState<string>("");
   const [images, setImages] = useState<PickedImage[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
@@ -94,6 +101,10 @@ function AddPostPage() {
       toast.error("Description trop courte (min 5 caractères)");
       return;
     }
+    if (!category) {
+      toast.error("Choisissez une catégorie");
+      return;
+    }
     setSubmitting(true);
     try {
       const uploadedPaths: string[] = [];
@@ -117,6 +128,7 @@ function AddPostPage() {
         shop_name: profile.shop_name!,
         whatsapp: profile.whatsapp!,
         payment_methods: profile.payment_methods,
+        category,
       });
       if (insErr) throw insErr;
       toast.success("Publication en ligne !");
@@ -280,6 +292,23 @@ function AddPostPage() {
                 placeholder="ex: 1 250 000 BIF"
                 className="w-full h-11 rounded-xl bg-card border border-border px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               />
+            </div>
+
+            {/* Category */}
+            <div className="space-y-2">
+              <label htmlFor="cat" className="text-sm font-semibold">Catégorie *</label>
+              <select
+                id="cat"
+                required
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className="w-full h-11 rounded-xl bg-card border border-border px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="">— Choisir —</option>
+                {CATEGORIES.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
             </div>
 
             {/* Auto-attached preview */}
