@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Search, Home, Store, ShoppingBag, PlusSquare, User, MapPin, MessageCircle, Loader2 } from "lucide-react";
+import { Search, Home, Store, ShoppingBag, PlusSquare, User, MapPin, MessageCircle, Loader2, Flame } from "lucide-react";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { LanguageSwitcher, useI18n } from "@/lib/i18n";
@@ -33,7 +33,21 @@ type FeedPost = {
   shop_name: string;
   whatsapp: string;
   payment_methods: string[];
-  author: { username: string; avatar_url: string | null; avatarSignedUrl: string | null; online: boolean };
+  category: string | null;
+  created_at: string;
+  boosted_at: string | null;
+  author_id: string;
+  score: number;
+  boosted: boolean;
+  author: {
+    username: string;
+    avatar_url: string | null;
+    avatarSignedUrl: string | null;
+    online: boolean;
+    last_active_at: string | null;
+    city: string | null;
+    province: string | null;
+  };
 };
 
 function initials(name: string) {
@@ -43,45 +57,148 @@ function initials(name: string) {
 function Index() {
   const { t } = useI18n();
   const [posts, setPosts] = useState<FeedPost[] | null>(null);
+  const [me, setMe] = useState<{ id: string; city: string | null; province: string | null; last_boost_at: string | null } | null>(null);
+
+  const loadFeed = async (viewer: typeof me) => {
+    const { data, error } = await supabase
+      .from("posts")
+      .select("id, role, description, price, images, address, shop_name, whatsapp, payment_methods, category, created_at, boosted_at, author_id, profiles:author_id(username, avatar_url, online_until, last_active_at, city, province)")
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (error || !data) { setPosts([]); return; }
+
+    const now = Date.now();
+    const MAX_AGE_DAYS = 14;
+    const active = data.filter((row: any) => {
+      const ageDays = (now - new Date(row.created_at).getTime()) / 86_400_000;
+      return ageDays <= MAX_AGE_DAYS;
+    });
+
+    const enriched: FeedPost[] = await Promise.all(
+      active.map(async (row: any) => {
+        const imageUrls: string[] = [];
+        for (const p of row.images ?? []) {
+          const { data: s } = await supabase.storage.from("post-images").createSignedUrl(p, 60 * 60);
+          if (s?.signedUrl) imageUrls.push(s.signedUrl);
+        }
+        let avatarSignedUrl: string | null = null;
+        if (row.profiles?.avatar_url) {
+          const { data: s } = await supabase.storage.from("avatars").createSignedUrl(row.profiles.avatar_url, 60 * 60);
+          avatarSignedUrl = s?.signedUrl ?? null;
+        }
+
+        // Scoring
+        let complet = 0;
+        if ((row.images ?? []).length > 0) complet += 0.4;
+        if ((row.description ?? "").trim().length > 20) complet += 0.2;
+        if (row.price && String(row.price).trim().length > 0) complet += 0.2;
+        if ((row.address ?? "").trim().length > 0) complet += 0.2;
+
+        const lastActive = row.profiles?.last_active_at
+          ? new Date(row.profiles.last_active_at).getTime()
+          : row.profiles?.online_until
+            ? new Date(row.profiles.online_until).getTime() - 24 * 3600_000
+            : 0;
+        const minsSinceActive = lastActive ? (now - lastActive) / 60_000 : Infinity;
+        let online = 0.1;
+        if (minsSinceActive <= 15) online = 1.0;
+        else if (minsSinceActive <= 60 * 24) online = 0.6;
+        else if (minsSinceActive <= 60 * 24 * 7) online = 0.3;
+
+        const ageDays = (now - new Date(row.created_at).getTime()) / 86_400_000;
+        const recency = 1 / (1 + ageDays);
+
+        let region = 0.3;
+        if (viewer?.city && row.profiles?.city && viewer.city.trim().toLowerCase() === String(row.profiles.city).trim().toLowerCase()) {
+          region = 1.0;
+        } else if (viewer?.province && row.profiles?.province && viewer.province.trim().toLowerCase() === String(row.profiles.province).trim().toLowerCase()) {
+          region = 0.6;
+        }
+
+        let score = complet * 0.35 + online * 0.25 + recency * 0.25 + region * 0.15;
+
+        const boosted = row.boosted_at ? (now - new Date(row.boosted_at).getTime()) < 24 * 3600_000 : false;
+        if (boosted) score += 0.3;
+
+        return {
+          id: row.id, role: row.role, description: row.description, price: row.price,
+          images: row.images ?? [], imageUrls,
+          address: row.address, shop_name: row.shop_name, whatsapp: row.whatsapp,
+          payment_methods: row.payment_methods ?? [],
+          category: row.category ?? null,
+          created_at: row.created_at,
+          boosted_at: row.boosted_at ?? null,
+          author_id: row.author_id,
+          score, boosted,
+          author: {
+            username: row.profiles?.username ?? "utilisateur",
+            avatar_url: row.profiles?.avatar_url ?? null,
+            avatarSignedUrl,
+            online: row.profiles?.online_until ? new Date(row.profiles.online_until).getTime() > now : false,
+            last_active_at: row.profiles?.last_active_at ?? null,
+            city: row.profiles?.city ?? null,
+            province: row.profiles?.province ?? null,
+          },
+        };
+      }),
+    );
+
+    // Sort by score desc
+    enriched.sort((a, b) => b.score - a.score);
+
+    // Category interleaving: no more than 2 consecutive same category
+    const result: FeedPost[] = [];
+    const pool = [...enriched];
+    while (pool.length) {
+      const lastCat = result.length >= 2 && result[result.length - 1].category === result[result.length - 2].category
+        ? result[result.length - 1].category
+        : null;
+      let pickIdx = 0;
+      if (lastCat) {
+        const alt = pool.findIndex((p) => p.category !== lastCat);
+        if (alt !== -1) pickIdx = alt;
+      }
+      result.push(pool.splice(pickIdx, 1)[0]);
+    }
+
+    setPosts(result);
+  };
 
   useEffect(() => {
     (async () => {
-      const { data, error } = await supabase
-        .from("posts")
-        .select("id, role, description, price, images, address, shop_name, whatsapp, payment_methods, author_id, profiles:author_id(username, avatar_url, online_until)")
-        .order("created_at", { ascending: false })
-        .limit(50);
-      if (error || !data) { setPosts([]); return; }
-
-      const enriched: FeedPost[] = await Promise.all(
-        data.map(async (row: any) => {
-          const imageUrls: string[] = [];
-          for (const p of row.images ?? []) {
-            const { data: s } = await supabase.storage.from("post-images").createSignedUrl(p, 60 * 60);
-            if (s?.signedUrl) imageUrls.push(s.signedUrl);
-          }
-          let avatarSignedUrl: string | null = null;
-          if (row.profiles?.avatar_url) {
-            const { data: s } = await supabase.storage.from("avatars").createSignedUrl(row.profiles.avatar_url, 60 * 60);
-            avatarSignedUrl = s?.signedUrl ?? null;
-          }
-          return {
-            id: row.id, role: row.role, description: row.description, price: row.price,
-            images: row.images ?? [], imageUrls,
-            address: row.address, shop_name: row.shop_name, whatsapp: row.whatsapp,
-            payment_methods: row.payment_methods ?? [],
-            author: {
-              username: row.profiles?.username ?? "utilisateur",
-              avatar_url: row.profiles?.avatar_url ?? null,
-              avatarSignedUrl,
-              online: row.profiles?.online_until ? new Date(row.profiles.online_until).getTime() > Date.now() : false,
-            },
-          };
-        }),
-      );
-      setPosts(enriched);
+      const { data: auth } = await supabase.auth.getUser();
+      let viewer: typeof me = null;
+      if (auth.user) {
+        // heartbeat presence
+        await supabase.from("profiles").update({ last_active_at: new Date().toISOString() }).eq("id", auth.user.id);
+        const { data: p } = await supabase
+          .from("profiles")
+          .select("id, city, province, last_boost_at")
+          .eq("id", auth.user.id)
+          .maybeSingle();
+        viewer = p ? { id: p.id, city: p.city, province: p.province, last_boost_at: p.last_boost_at } : { id: auth.user.id, city: null, province: null, last_boost_at: null };
+        setMe(viewer);
+      }
+      await loadFeed(viewer);
     })();
   }, []);
+
+  const handleBoost = async (postId: string) => {
+    if (!me) return;
+    const now = Date.now();
+    if (me.last_boost_at && now - new Date(me.last_boost_at).getTime() < 7 * 86_400_000) {
+      const daysLeft = Math.ceil((7 * 86_400_000 - (now - new Date(me.last_boost_at).getTime())) / 86_400_000);
+      alert(`Prochain boost gratuit dans ${daysLeft} jour(s).`);
+      return;
+    }
+    const iso = new Date().toISOString();
+    const { error } = await supabase.from("posts").update({ boosted_at: iso }).eq("id", postId).eq("author_id", me.id);
+    if (error) { alert("Erreur boost"); return; }
+    await supabase.from("profiles").update({ last_boost_at: iso }).eq("id", me.id);
+    const nextMe = { ...me, last_boost_at: iso };
+    setMe(nextMe);
+    await loadFeed(nextMe);
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground pb-24">
@@ -143,6 +260,7 @@ function Index() {
             const isSeller = p.role === "seller";
             const waNumber = p.whatsapp.replace(/[^\d]/g, "");
             const waUrl = `https://wa.me/${waNumber}?text=${encodeURIComponent(`Bonjour ${p.author.username}, je vous contacte via P2P au sujet de: ${p.description}`)}`;
+            const isMine = me?.id === p.author_id;
             return (
               <article key={p.id} className="rounded-2xl bg-card border border-border overflow-hidden shadow-sm">
                 <div className="p-4">
@@ -176,6 +294,16 @@ function Index() {
                         >
                           {t(isSeller ? "role.Vendeur" : "role.Acheteur")}
                         </span>
+                        {p.boosted && (
+                          <span className="text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full bg-orange-500/15 text-orange-500 inline-flex items-center gap-1">
+                            <Flame className="h-3 w-3" /> En avant
+                          </span>
+                        )}
+                        {p.category && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-secondary border border-border text-muted-foreground">
+                            {p.category}
+                          </span>
+                        )}
                       </div>
                       <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
                         <MapPin className="h-3.5 w-3.5" />
@@ -214,15 +342,25 @@ function Index() {
 
                 <div className="p-4 mt-2 flex items-center justify-between gap-3 border-t border-border">
                   <div className="text-base font-bold text-foreground">{p.price ?? ""}</div>
-                  <a
-                    href={waUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-2 rounded-full bg-whatsapp text-primary-foreground px-4 py-2 text-sm font-semibold hover:opacity-90 transition"
-                  >
-                    <MessageCircle className="h-4 w-4" />
-                    WhatsApp
-                  </a>
+                  <div className="flex items-center gap-2">
+                    {isMine && !p.boosted && (
+                      <button
+                        onClick={() => handleBoost(p.id)}
+                        className="inline-flex items-center gap-1.5 rounded-full bg-orange-500/10 border border-orange-500/30 text-orange-500 px-3 py-2 text-xs font-semibold hover:bg-orange-500/20"
+                      >
+                        <Flame className="h-3.5 w-3.5" /> Booster
+                      </button>
+                    )}
+                    <a
+                      href={waUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-2 rounded-full bg-whatsapp text-primary-foreground px-4 py-2 text-sm font-semibold hover:opacity-90 transition"
+                    >
+                      <MessageCircle className="h-4 w-4" />
+                      WhatsApp
+                    </a>
+                  </div>
                 </div>
               </article>
             );
