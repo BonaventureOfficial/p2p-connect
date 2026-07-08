@@ -20,6 +20,13 @@ const CATEGORIES = [
   "Électroniques", "Hôtels", "Restaurants", "Cargo", "Vêtements",
   "Kit de Cuisine", "Kit de Sport", "Voitures", "Instruments de Musique",
   "Kit Média", "Hôpitaux", "Les Vivres", "Immobilier", "Beauté", "Agriculture",
+  "Téléphones & Accessoires", "Ordinateurs & Informatique", "Chaussures",
+  "Bijoux & Accessoires", "Tissus & Pagnes", "Meubles", "Électroménager",
+  "Panneaux Solaires & Générateurs", "Produits Agricoles",
+  "Bétail & Volaille", "Matériel Agricole", "Terrains & Immobilier",
+  "Construction & Rénovation", "Coiffure & Beauté", "Événementiel",
+  "Cours & Formations", "Livres & Fournitures scolaires", "Jeux & Jouets",
+  "Réparation & Services techniques", "Produits Cosmétiques",
 ];
 
 type FeedPost = {
