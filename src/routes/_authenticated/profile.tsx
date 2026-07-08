@@ -84,8 +84,9 @@ function ProfilePage() {
   const deletePost = async (postId: string, images: string[]) => {
     if (!confirm("Supprimer ce post définitivement ?")) return;
     setBusyPost(true);
-    if (images.length > 0) {
-      await supabase.storage.from("post-images").remove(images);
+    if (images && images.length > 0) {
+      const { error: rmErr } = await supabase.storage.from("post-images").remove(images);
+      if (rmErr) console.warn("storage remove:", rmErr.message);
     }
     const { error } = await supabase.from("posts").delete().eq("id", postId);
     if (error) toast.error(error.message);
@@ -104,10 +105,6 @@ function ProfilePage() {
     const post = posts.find((x) => x.id === activePostId);
     if (!post) return;
     setBusyPost(true);
-    // Delete old images
-    if (post.images.length > 0) {
-      await supabase.storage.from("post-images").remove(post.images);
-    }
     const newPaths: string[] = [];
     for (const f of files) {
       if (f.size > 5 * 1024 * 1024) {
@@ -122,8 +119,19 @@ function ProfilePage() {
     }
     if (newPaths.length > 0) {
       const { error } = await supabase.from("posts").update({ images: newPaths }).eq("id", activePostId);
-      if (error) toast.error(error.message);
-      else toast.success("Photos remplacées");
+      if (error) {
+        toast.error(error.message);
+        // rollback newly uploaded files if DB update failed
+        await supabase.storage.from("post-images").remove(newPaths);
+      } else {
+        // only remove old images after DB update succeeded
+        if (post.images && post.images.length > 0) {
+          await supabase.storage.from("post-images").remove(post.images);
+        }
+        toast.success("Photos remplacées");
+      }
+    } else {
+      toast.error("Aucune image valide");
     }
     setActivePostId(null);
     setBusyPost(false);
