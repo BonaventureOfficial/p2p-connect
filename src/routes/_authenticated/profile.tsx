@@ -367,21 +367,28 @@ function ProfilePage() {
                   className="w-full text-left rounded-xl border border-border bg-card overflow-hidden hover:border-foreground/40 transition"
                 >
                   <div className="grid grid-cols-3 gap-0.5 bg-border">
-                    {[0, 1, 2].map((i) => {
-                      const src = p.signedThumbs[i];
-                      return (
-                        <div
-                          key={i}
-                          className="aspect-square bg-secondary grid place-items-center overflow-hidden"
-                        >
-                          {src ? (
-                            <img src={src} alt="" className="h-full w-full object-cover" />
-                          ) : (
-                            <ImageIcon className="h-5 w-5 text-muted-foreground/40" />
-                          )}
-                        </div>
-                      );
-                    })}
+                    {p.signedThumbs.length === 0 ? (
+                      <div className="col-span-3 aspect-[3/1] bg-secondary grid place-items-center gap-2 text-muted-foreground">
+                        <ImageIcon className="h-6 w-6 opacity-40" />
+                        <span className="text-[11px]">Post sans photo</span>
+                      </div>
+                    ) : (
+                      [0, 1, 2].map((i) => {
+                        const src = p.signedThumbs[i];
+                        return (
+                          <div
+                            key={i}
+                            className="aspect-square bg-secondary grid place-items-center overflow-hidden"
+                          >
+                            {src ? (
+                              <img src={src} alt="" className="h-full w-full object-cover" />
+                            ) : (
+                              <ImageIcon className="h-5 w-5 text-muted-foreground/40" />
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
                   </div>
                   <p className="p-3 text-xs text-foreground/80 line-clamp-2">{p.description}</p>
                 </button>
