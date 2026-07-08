@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Search, Home, Store, ShoppingBag, PlusSquare, User, MapPin, MessageCircle, Loader2, Flame } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Search, Home, Store, ShoppingBag, PlusSquare, User, MapPin, MessageCircle, Loader2, Flame, Eye, Heart, MessageSquare, Send, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { LanguageSwitcher, useI18n } from "@/lib/i18n";
 
@@ -61,10 +61,36 @@ function initials(name: string) {
   return name.split(/[\s._-]+/).filter(Boolean).slice(0, 2).map((s) => s[0]?.toUpperCase() ?? "").join("") || "?";
 }
 
+function getAnonId(): string {
+  if (typeof window === "undefined") return "ssr";
+  let id = localStorage.getItem("p2p_anon_id");
+  if (!id) {
+    id = "anon_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    localStorage.setItem("p2p_anon_id", id);
+  }
+  return id;
+}
+
+function timeAgo(iso: string): string {
+  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return "à l'instant";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `il y a ${m} min`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `il y a ${h}h`;
+  const d = Math.floor(h / 24);
+  return `il y a ${d}j`;
+}
+
+type Tab = "home" | "seller" | "buyer";
+
 function Index() {
   const { t } = useI18n();
   const [posts, setPosts] = useState<FeedPost[] | null>(null);
   const [me, setMe] = useState<{ id: string; city: string | null; province: string | null; last_boost_at: string | null } | null>(null);
+  const [tab, setTab] = useState<Tab>("home");
+  const [engagement, setEngagement] = useState<Record<string, { views: number; likes: number; comments: number; liked: boolean }>>({});
+  const [openComments, setOpenComments] = useState<string | null>(null);
 
   const loadFeed = async (viewer: typeof me) => {
     const { data, error } = await supabase
@@ -153,22 +179,83 @@ function Index() {
     // Sort by score desc
     enriched.sort((a, b) => b.score - a.score);
 
-    // Category interleaving: no more than 2 consecutive same category
-    const result: FeedPost[] = [];
-    const pool = [...enriched];
-    while (pool.length) {
-      const lastCat = result.length >= 2 && result[result.length - 1].category === result[result.length - 2].category
-        ? result[result.length - 1].category
-        : null;
-      let pickIdx = 0;
-      if (lastCat) {
-        const alt = pool.findIndex((p) => p.category !== lastCat);
-        if (alt !== -1) pickIdx = alt;
-      }
-      result.push(pool.splice(pickIdx, 1)[0]);
-    }
+    setPosts(enriched);
+  };
 
-    setPosts(result);
+  // Apply anti-monotony rules on the CURRENT filtered view
+  const applyInterleave = (list: FeedPost[], enforceRole: boolean): FeedPost[] => {
+    const result: FeedPost[] = [];
+    const pool = [...list];
+    while (pool.length) {
+      const n = result.length;
+      const catBlocked = n >= 2 && result[n - 1].category && result[n - 1].category === result[n - 2].category
+        ? result[n - 1].category : null;
+      const roleBlocked = enforceRole && n >= 2 && result[n - 1].role === result[n - 2].role
+        ? result[n - 1].role : null;
+      let idx = pool.findIndex((p) =>
+        (!catBlocked || p.category !== catBlocked) &&
+        (!roleBlocked || p.role !== roleBlocked),
+      );
+      if (idx === -1) idx = 0;
+      result.push(pool.splice(idx, 1)[0]);
+    }
+    return result;
+  };
+
+  // Load engagement counters + liked state for visible posts
+  const loadEngagement = async (ids: string[], userId: string | null) => {
+    if (ids.length === 0) return;
+    const [{ data: views }, { data: likes }, { data: comments }] = await Promise.all([
+      supabase.from("post_views").select("post_id").in("post_id", ids),
+      supabase.from("post_likes").select("post_id, user_id").in("post_id", ids),
+      supabase.from("post_comments").select("post_id").in("post_id", ids),
+    ]);
+    const map: Record<string, { views: number; likes: number; comments: number; liked: boolean }> = {};
+    ids.forEach((id) => (map[id] = { views: 0, likes: 0, comments: 0, liked: false }));
+    (views ?? []).forEach((r: any) => { if (map[r.post_id]) map[r.post_id].views += 1; });
+    (likes ?? []).forEach((r: any) => {
+      if (!map[r.post_id]) return;
+      map[r.post_id].likes += 1;
+      if (userId && r.user_id === userId) map[r.post_id].liked = true;
+    });
+    (comments ?? []).forEach((r: any) => { if (map[r.post_id]) map[r.post_id].comments += 1; });
+    setEngagement((prev) => ({ ...prev, ...map }));
+  };
+
+  const recordView = async (postId: string) => {
+    const anonId = getAnonId();
+    const viewerId = me?.id ?? anonId;
+    const viewerType = me?.id ? "user" : "anonymous";
+    // Local dedupe cache to avoid repeat insert per session
+    const key = `p2p_seen_${postId}`;
+    if (sessionStorage.getItem(key)) return;
+    sessionStorage.setItem(key, "1");
+    const { error } = await supabase.from("post_views").insert({
+      post_id: postId, viewer_id: viewerId, viewer_type: viewerType,
+    } as any);
+    if (!error) {
+      setEngagement((prev) => ({
+        ...prev,
+        [postId]: { ...(prev[postId] ?? { views: 0, likes: 0, comments: 0, liked: false }), views: (prev[postId]?.views ?? 0) + 1 },
+      }));
+    }
+  };
+
+  const toggleLike = async (postId: string) => {
+    if (!me) { alert("Connectez-vous pour aimer ce post."); return; }
+    const cur = engagement[postId];
+    if (cur?.liked) {
+      await supabase.from("post_likes").delete().eq("post_id", postId).eq("user_id", me.id);
+      setEngagement((p) => ({ ...p, [postId]: { ...cur, liked: false, likes: Math.max(0, cur.likes - 1) } }));
+    } else {
+      const { error } = await supabase.from("post_likes").insert({ post_id: postId, user_id: me.id } as any);
+      if (!error) {
+        setEngagement((p) => ({
+          ...p,
+          [postId]: { ...(cur ?? { views: 0, likes: 0, comments: 0, liked: false }), liked: true, likes: (cur?.likes ?? 0) + 1 },
+        }));
+      }
+    }
   };
 
   useEffect(() => {
@@ -189,6 +276,12 @@ function Index() {
       await loadFeed(viewer);
     })();
   }, []);
+
+  // When posts loaded, fetch engagement counters
+  useEffect(() => {
+    if (!posts) return;
+    loadEngagement(posts.map((p) => p.id), me?.id ?? null);
+  }, [posts, me?.id]);
 
   const handleBoost = async (postId: string) => {
     if (!me) return;
@@ -263,13 +356,18 @@ function Index() {
             </Link>
           </div>
         ) : (
-          posts.map((p) => {
+          applyInterleave(
+            tab === "home" ? posts : posts.filter((p) => p.role === (tab === "seller" ? "seller" : "buyer")),
+            tab === "home",
+          ).map((p) => {
             const isSeller = p.role === "seller";
             const waNumber = p.whatsapp.replace(/[^\d]/g, "");
             const waUrl = `https://wa.me/${waNumber}?text=${encodeURIComponent(`Bonjour ${p.author.username}, je vous contacte via P2P au sujet de: ${p.description}`)}`;
             const isMine = me?.id === p.author_id;
+            const eng = engagement[p.id] ?? { views: 0, likes: 0, comments: 0, liked: false };
             return (
-              <article key={p.id} className="rounded-2xl bg-card border border-border overflow-hidden shadow-sm">
+              <PostCard key={p.id} postId={p.id} onView={recordView}>
+              <article className="rounded-2xl bg-card border border-border overflow-hidden shadow-sm">
                 <div className="p-4">
                   <div className="flex items-start gap-3">
                     <div className="relative shrink-0">
@@ -369,24 +467,46 @@ function Index() {
                     </a>
                   </div>
                 </div>
+                <div className="px-4 py-2 border-t border-border flex items-center gap-4 text-xs text-muted-foreground">
+                  <span className="inline-flex items-center gap-1"><Eye className="h-3.5 w-3.5" /> {eng.views}</span>
+                  <button onClick={() => toggleLike(p.id)} className={`inline-flex items-center gap-1 hover:text-foreground ${eng.liked ? "text-red-500" : ""}`}>
+                    <Heart className={`h-3.5 w-3.5 ${eng.liked ? "fill-current" : ""}`} /> {eng.likes}
+                  </button>
+                  <button onClick={() => setOpenComments(p.id)} className="inline-flex items-center gap-1 hover:text-foreground">
+                    <MessageSquare className="h-3.5 w-3.5" /> {eng.comments}
+                  </button>
+                </div>
               </article>
+              </PostCard>
             );
           })
         )}
       </main>
 
+      {openComments && (
+        <CommentsSheet
+          postId={openComments}
+          me={me}
+          onClose={() => setOpenComments(null)}
+          onCountChange={(n) => setEngagement((p) => ({
+            ...p,
+            [openComments]: { ...(p[openComments] ?? { views: 0, likes: 0, comments: 0, liked: false }), comments: n },
+          }))}
+        />
+      )}
+
       {/* FOOTER NAV */}
       <footer className="fixed bottom-0 inset-x-0 z-40 bg-card/95 backdrop-blur border-t border-border">
         <div className="mx-auto max-w-2xl px-2 py-2 grid grid-cols-5 items-center gap-1 text-[11px]">
-          <FooterBtn icon={<Home className="h-5 w-5" />} label={t("nav.home")} active />
-          <FooterBtn icon={<Store className="h-5 w-5" />} label={t("nav.seller")} tone="seller" />
+          <FooterBtn icon={<Home className="h-5 w-5" />} label={t("nav.home")} active={tab === "home"} onClick={() => setTab("home")} />
+          <FooterBtn icon={<Store className="h-5 w-5" />} label={t("nav.seller")} tone="seller" active={tab === "seller"} onClick={() => setTab("seller")} />
           <Link to="/add" className="flex flex-col items-center justify-center">
             <span className="h-11 w-11 -mt-6 rounded-full bg-foreground text-background grid place-items-center shadow-lg">
               <PlusSquare className="h-5 w-5" />
             </span>
             <span className="mt-1 font-medium text-muted-foreground">{t("nav.add")}</span>
           </Link>
-          <FooterBtn icon={<ShoppingBag className="h-5 w-5" />} label={t("nav.buyer")} tone="buyer" />
+          <FooterBtn icon={<ShoppingBag className="h-5 w-5" />} label={t("nav.buyer")} tone="buyer" active={tab === "buyer"} onClick={() => setTab("buyer")} />
           <Link to="/profile" className="flex flex-col items-center justify-center py-1 gap-0.5 text-muted-foreground hover:text-foreground">
             <User className="h-5 w-5" />
             <span className="font-medium text-[11px]">{t("nav.profile")}</span>
@@ -398,16 +518,119 @@ function Index() {
 }
 
 function FooterBtn({
-  icon, label, tone, active,
-}: { icon: React.ReactNode; label: string; tone?: "seller" | "buyer"; active?: boolean }) {
+  icon, label, tone, active, onClick,
+}: { icon: React.ReactNode; label: string; tone?: "seller" | "buyer"; active?: boolean; onClick?: () => void }) {
   const color =
-    tone === "seller" ? "text-seller"
-    : tone === "buyer" ? "text-buyer"
-    : active ? "text-foreground" : "text-muted-foreground";
+    active
+      ? tone === "seller" ? "text-seller" : tone === "buyer" ? "text-buyer" : "text-foreground"
+      : "text-muted-foreground";
   return (
-    <button className={`flex flex-col items-center justify-center py-1 gap-0.5 ${color}`}>
+    <button onClick={onClick} className={`flex flex-col items-center justify-center py-1 gap-0.5 ${color}`}>
       {icon}
       <span className="font-medium">{label}</span>
     </button>
+  );
+}
+
+function PostCard({ postId, onView, children }: { postId: string; onView: (id: string) => void; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((e) => {
+        if (e.isIntersecting && e.intersectionRatio >= 0.5) {
+          if (!timer) timer = setTimeout(() => { onView(postId); }, 5000);
+        } else if (timer) { clearTimeout(timer); timer = null; }
+      });
+    }, { threshold: [0, 0.5, 1] });
+    io.observe(el);
+    return () => { io.disconnect(); if (timer) clearTimeout(timer); };
+  }, [postId, onView]);
+  return <div ref={ref}>{children}</div>;
+}
+
+type CommentRow = { id: string; user_id: string; content: string; created_at: string; author?: { username: string; avatar_url: string | null; avatarSignedUrl: string | null } };
+
+function CommentsSheet({ postId, me, onClose, onCountChange }: {
+  postId: string;
+  me: { id: string } | null;
+  onClose: () => void;
+  onCountChange: (n: number) => void;
+}) {
+  const [rows, setRows] = useState<CommentRow[] | null>(null);
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+
+  const load = async () => {
+    const { data } = await supabase
+      .from("post_comments")
+      .select("id, user_id, content, created_at, profiles:user_id(username, avatar_url)")
+      .eq("post_id", postId)
+      .order("created_at", { ascending: true });
+    const enriched: CommentRow[] = await Promise.all((data ?? []).map(async (r: any) => {
+      let avatarSignedUrl: string | null = null;
+      if (r.profiles?.avatar_url) {
+        const { data: s } = await supabase.storage.from("avatars").createSignedUrl(r.profiles.avatar_url, 60 * 60);
+        avatarSignedUrl = s?.signedUrl ?? null;
+      }
+      return { id: r.id, user_id: r.user_id, content: r.content, created_at: r.created_at, author: { username: r.profiles?.username ?? "utilisateur", avatar_url: r.profiles?.avatar_url ?? null, avatarSignedUrl } };
+    }));
+    setRows(enriched);
+    onCountChange(enriched.length);
+  };
+
+  useEffect(() => { load(); }, [postId]);
+
+  const send = async () => {
+    if (!me) { alert("Connectez-vous pour commenter."); return; }
+    const content = text.trim();
+    if (!content) return;
+    setSending(true);
+    const { error } = await supabase.from("post_comments").insert({ post_id: postId, user_id: me.id, content } as any);
+    if (!error) { setText(""); await load(); }
+    setSending(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 grid place-items-end" onClick={onClose}>
+      <div className="w-full max-w-2xl bg-card border-t border-border rounded-t-2xl flex flex-col max-h-[80vh]" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-border">
+          <h3 className="font-bold text-foreground">Commentaires</h3>
+          <button onClick={onClose} className="h-8 w-8 grid place-items-center rounded-full hover:bg-secondary"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {rows === null ? (
+            <div className="grid place-items-center py-10 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /></div>
+          ) : rows.length === 0 ? (
+            <p className="text-center text-sm text-muted-foreground py-8">Aucun commentaire. Soyez le premier !</p>
+          ) : rows.map((c) => (
+            <div key={c.id} className="flex gap-2.5">
+              <div className="h-8 w-8 rounded-full bg-secondary overflow-hidden grid place-items-center text-xs font-bold shrink-0">
+                {c.author?.avatarSignedUrl ? <img src={c.author.avatarSignedUrl} alt="" className="h-full w-full object-cover" /> : initials(c.author?.username ?? "?")}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs"><span className="font-semibold text-foreground">{c.author?.username}</span> <span className="text-muted-foreground">· {timeAgo(c.created_at)}</span></div>
+                <p className="text-sm text-foreground/90 whitespace-pre-wrap break-words">{c.content}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="p-3 border-t border-border flex items-center gap-2">
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value.slice(0, 300))}
+            placeholder={me ? "Écrire un commentaire…" : "Connectez-vous pour commenter"}
+            disabled={!me || sending}
+            onKeyDown={(e) => { if (e.key === "Enter") send(); }}
+            className="flex-1 h-10 rounded-full bg-secondary border border-border px-4 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+          />
+          <button onClick={send} disabled={!me || sending || !text.trim()} className="h-10 w-10 grid place-items-center rounded-full bg-foreground text-background disabled:opacity-40">
+            <Send className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
